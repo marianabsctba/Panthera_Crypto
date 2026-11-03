@@ -15,9 +15,9 @@
 │                                     rindexer para eventos        │
 └──────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────── Panthera ────────────────────────────┐
-│ Coletor Panthera Crypto: normaliza, consulta listas, grava JSON  │
+│ Coletor Panthera Crypto: normaliza, consulta listas, aplica      │
+│ regras e avisa por ntfy, Telegram, e-mail ou webhook             │
 │ MISP: listas OFAC, ScamSniffer, indicadores dos incidentes       │
-│ Wazuh: regras, alerta, resposta                                  │
 │ Panthera Track: chamado aberto pelo alerta                       │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -26,17 +26,16 @@
 
 Quase tudo acima já existe. O que falta e seria código do projeto:
 
-1. **Coletor**: junta ZMQ do Bitcoin Core, WebSocket do mempool e webhook do OpenZeppelin Monitor num formato único e grava para o Wazuh ([formato](integracao-soc.md)).
+1. **Coletor**: junta ZMQ do Bitcoin Core, WebSocket do mempool e webhook do OpenZeppelin Monitor num formato único, aplica as regras e manda o alerta ([formato e regras](alertas.md)).
 2. **Cadastro de carteiras por organização**: descritores e endereços só leitura, agenda de endereços conferidos, limites de valor por carteira. Guardado cifrado.
 3. **Carga das listas no MISP**: tarefa que baixa a lista OFAC e a do ScamSniffer e atualiza os feeds.
-4. **Regras do Wazuh** para os eventos de cripto.
-5. **Tela no console do Roar** para as carteiras e os alertas, se fizer sentido juntar.
+4. **Tela no console do Roar** para as carteiras e os alertas, se fizer sentido juntar.
 
 ## Fases
 
 | Fase | Entrega | Pronto quando |
 |---|---|---|
-| 1 | Bitcoin Core em testnet4 + carteira só leitura + `walletnotify` gravando JSON | Uma transação de teste vira alerta no Wazuh com o valor certo |
+| 1 | Bitcoin Core em testnet4 + carteira só leitura + `walletnotify` gravando JSON | Uma transação de teste vira alerta no celular com o valor certo |
 | 2 | Agenda de endereços e regra de destino desconhecido, alerta ainda na mempool | Saída para endereço fora da agenda gera alerta de nível alto antes da confirmação |
 | 3 | Listas OFAC e ScamSniffer no MISP, consulta pelo coletor | Endereço da lista no destino gera alerta crítico |
 | 4 | EVM em Sepolia com OpenZeppelin Monitor: transferências, aprovações ilimitadas e valor zero | Os três tipos viram alerta, testados com contratos de teste próprios |

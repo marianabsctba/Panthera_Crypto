@@ -23,7 +23,7 @@ Como montar o alerta em Bitcoin:
 
 1. Importar no Bitcoin Core o descritor só leitura de cada carteira (`importdescriptors` numa carteira criada com `disable_private_keys`).
 2. Assinar as notificações ZMQ do nó (`zmqpubrawtx` e `zmqpubhashblock`) ou usar o `walletnotify`, que roda um comando a cada transação que toca a carteira.
-3. Para cada evento, separar entrada e saída, calcular o valor e mandar para o SOC no formato de [integração](integracao-soc.md).
+3. Para cada evento, separar entrada e saída, calcular o valor e mandar para o coletor no formato descrito em [alertas](alertas.md).
 4. Alertar já na transação vista na mempool, antes da confirmação: é o momento em que ainda há algo a fazer, como uma transação concorrente com taxa maior se a saída foi indevida e a carteira ainda tem outra chave.
 
 Para quem não quer escrever o passo 3, a API WebSocket do mempool próprio faz o acompanhamento por endereço.

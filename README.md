@@ -11,7 +11,7 @@ Nada aqui é recomendação de investimento. O foco é segurança: não perder a
 3. [Monitoramento](docs/monitoramento.md): nó próprio, endereços em modo só leitura e alertas de movimentação em Bitcoin e em redes EVM
 4. [Contratos e DeFi](docs/contratos-e-defi.md): análise de contratos, simulação antes de assinar e revogação de aprovações
 5. [Inteligência e rastreio](docs/inteligencia.md): listas de sanções e de golpes, análise de fluxo e MISP
-6. [Integração com o SOC](docs/integracao-soc.md): como os alertas chegam ao Wazuh e ao MISP do ecossistema Panthera
+6. [Alertas](docs/alertas.md): formato dos eventos, regras e canais de aviso
 7. [Arquitetura de referência e próximos passos](docs/arquitetura.md)
 8. [Descartados](docs/descartados.md): projetos conhecidos que ficaram de fora por licença ou por estarem parados
 
@@ -39,6 +39,6 @@ Isso confirma que o projeto existe, está ativo e é aberto. Não confirma que �
 | Chaves de servidor (API de exchange, assinador) | OpenBao | Web3Signer e Dirk para validadores |
 | Listas de endereços ruins | Lista OFAC extraída (0xB10C), ScamSniffer | lista de phishing da MetaMask |
 | Rastrear fluxo de fundos | GraphSense | — |
-| Correlacionar com o resto da segurança | Wazuh + MISP, que o Panthera já usa | — |
+| Avisar quem precisa saber | Coletor próprio com regras, consultando o MISP | ntfy, Telegram, e-mail, webhook |
 
 O ponto mais importante não é ferramenta: a maior parte das perdas vem de seed mal guardada, de assinar transação sem entender e de aprovação ilimitada esquecida. As ferramentas de monitoramento avisam depressa, mas em cadeia pública não há estorno. Proteger vem antes de monitorar.
