@@ -1,44 +1,69 @@
 # Panthera Crypto
 
-Levantamento de como monitorar e proteger criptomoedas usando só projetos open source. É o ponto de partida do projeto: antes de escrever código, saber o que já existe, o que está vivo e o que tem licença que permite uso livre.
+Monitoramento de carteiras de criptomoeda com open source, para muitas organizações ao mesmo tempo. Acompanha carteiras só pela parte pública, avisa quando o dinheiro se mexe e confere cada movimento contra os endereços conferidos e as listas de sanções. Nada aqui assina ou move valor.
 
-Nada aqui é recomendação de investimento. O foco é segurança: não perder a chave, não assinar o que não devia e saber logo quando algo se mexe.
+**Powered by Mariana BS**
+
+**Estado:** em construção. Pronto: Bitcoin (rede principal, testnet4, signet e regtest), carteiras por descritor ou endereços avulsos, alertas, canais de aviso e a console. Redes EVM vêm depois. A arquitetura e o que falta estão em [docs/arquitetura.md](docs/arquitetura.md).
+
+## Como funciona
+
+O nó Bitcoin próprio entrega cada transação e cada bloco uma vez, e o Panthera casa tudo de uma vez com os endereços de todas as organizações. O custo segue o volume da rede, não o número de endereços acompanhados. Nenhum endereço é consultado em serviço de terceiros.
+
+## Instalar
+
+Requer Linux com Docker, rodando como root ou com `sudo`. Na rede principal, o nó precisa de cerca de 800 GB em SSD e alguns dias para baixar a cadeia.
+
+```bash
+sudo bash infra/subir.sh --rede bitcoin
+```
+
+Os segredos ficam em `/opt/panthera-crypto/.env`. Rodar o mesmo comando de novo atualiza. Para mais vazão, mais cópias do avaliador e do avisador:
+
+```bash
+sudo docker compose -p panthera-crypto --env-file /opt/panthera-crypto/.env -f infra/docker-compose.yml up -d --scale avaliador=4 --scale avisador=2
+```
+
+Para criar uma organização e o primeiro acesso (a senha aparece uma vez só):
+
+```bash
+sudo docker compose -p panthera-crypto --env-file /opt/panthera-crypto/.env -f infra/docker-compose.yml run --rm api python -m cripto_api.contas criar --organizacao "Acme" --email pessoa@exemplo.test --nome "Pessoa"
+```
+
+## Ambiente de teste
+
+Em regtest, com um nó de verdade e um banco de teste criado do zero a cada rodada.
+
+```bash
+sudo bash infra/subir.sh --rede regtest
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
+sudo sh -c 'set -a; . /opt/panthera-crypto/.env; set +a; .venv/bin/python -m pytest testes'
+```
+
+Para ver a tela com dados de exemplo (o acesso fica em `/opt/panthera-crypto/demonstracao.txt`):
+
+```bash
+sudo docker compose -p panthera-crypto --env-file /opt/panthera-crypto/.env -f infra/docker-compose.yml run --rm -T -e CRIPTO_DEMONSTRACAO=- api python -m cripto_api.demonstracao | sudo install -m 600 /dev/stdin /opt/panthera-crypto/demonstracao.txt
+```
+
+A console fica em `http://127.0.0.1:8740`.
 
 ## Documentos
 
-1. [Ameaças](docs/ameacas.md): o que de fato rouba ou faz perder cripto, e qual controle responde a cada coisa
-2. [Custódia](docs/custodia.md): carteiras de hardware e de software, multisig, recuperação com prazo, MPC, backup da seed e chaves de servidor
-3. [Monitoramento](docs/monitoramento.md): nó próprio, endereços em modo só leitura e alertas de movimentação em Bitcoin e em redes EVM
-4. [Contratos e DeFi](docs/contratos-e-defi.md): análise de contratos, simulação antes de assinar e revogação de aprovações
-5. [Inteligência e rastreio](docs/inteligencia.md): listas de sanções e de golpes, análise de fluxo e MISP
-6. [Alertas](docs/alertas.md): formato dos eventos, regras e canais de aviso
-7. [Arquitetura de referência e próximos passos](docs/arquitetura.md)
+1. [Arquitetura](docs/arquitetura.md): o caminho de uma transação, por que assim e onde aperta primeiro
+2. [Alertas](docs/alertas.md): regras, canais e o formato do webhook
+3. [Ameaças](docs/ameacas.md): o que de fato rouba ou faz perder cripto, e qual controle responde a cada coisa
+4. [Custódia](docs/custodia.md): carteiras de hardware e de software, multisig, recuperação com prazo, MPC, backup da seed e chaves de servidor
+5. [Monitoramento](docs/monitoramento.md): levantamento de nós, explorers e monitores open source, em Bitcoin e em redes EVM
+6. [Contratos e DeFi](docs/contratos-e-defi.md): análise de contratos, simulação antes de assinar e revogação de aprovações
+7. [Inteligência e rastreio](docs/inteligencia.md): listas de sanções e de golpes, análise de fluxo e MISP
 8. [Descartados](docs/descartados.md): projetos conhecidos que ficaram de fora por licença ou por estarem parados
+9. [Padrão da console](web/DESIGN.md)
 
-## Como foi feito
+O levantamento de projetos foi conferido em 3 de novembro de 2026 pela API do GitHub: licença, último commit e se o repositório está arquivado. Isso confirma que o projeto existe, está ativo e é aberto, não que é seguro.
 
-A lista de projetos e o estado de cada um foram conferidos em 3 de novembro de 2026 pela API do GitHub: licença declarada, data do último push e se o repositório está arquivado. Quando a licença aparecia como "outra" (`NOASSERTION`), o texto foi lido. Projeto sem commit há mais de um ano, ou com licença que proíbe uso comercial, foi para a lista de descartados ou aparece com aviso.
+Nada aqui é recomendação de investimento. A maior parte das perdas vem de seed mal guardada, de assinar transação sem entender e de aprovação esquecida. Em cadeia pública não há estorno: proteger vem antes de monitorar.
 
-Isso confirma que o projeto existe, está ativo e é aberto. Não confirma que é seguro. Nenhum foi instalado ou testado ainda.
+## Licença
 
-## Resumo
-
-| Necessidade | Escolha principal | Alternativas |
-|---|---|---|
-| Guardar a chave de quem tem valor relevante | Multisig 2 de 3 com carteiras de fabricantes diferentes | Liana com chave de recuperação por prazo |
-| Carteira de hardware | BitBox02, Blockstream Jade, Trezor (firmware) | SeedSigner (sem estado, montada em casa), Keystone, KeepKey |
-| Coordenar carteira Bitcoin no computador | Sparrow | Electrum, Specter, Nunchuk, Liana |
-| Nó e consultas Bitcoin sem depender de terceiros | Bitcoin Core + Fulcrum ou electrs + mempool | Esplora, BTC RPC Explorer |
-| Alerta de movimentação em Bitcoin | Descritor só leitura no Bitcoin Core + ZMQ | Sparrow só leitura, API do mempool próprio |
-| Nó EVM | Geth ou Nethermind + Lighthouse | — |
-| Alerta de movimentação e eventos em EVM | OpenZeppelin Monitor | rindexer, Ponder |
-| Visão da carteira inteira, local | rotki | — |
-| Antes de assinar em DeFi | Rabby (simula a transação) | — |
-| Aprovações esquecidas | revoke.cash | — |
-| Analisar contrato antes de interagir ou publicar | Slither + Aderyn, Foundry, Echidna ou Medusa | Mythril, Halmos |
-| Chaves de servidor (API de exchange, assinador) | OpenBao | Web3Signer e Dirk para validadores |
-| Listas de endereços ruins | Lista OFAC extraída (0xB10C), ScamSniffer | lista de phishing da MetaMask |
-| Rastrear fluxo de fundos | GraphSense | — |
-| Avisar quem precisa saber | Coletor próprio com regras, consultando o MISP | ntfy, Telegram, e-mail, webhook |
-
-O ponto mais importante não é ferramenta: a maior parte das perdas vem de seed mal guardada, de assinar transação sem entender e de aprovação ilimitada esquecida. As ferramentas de monitoramento avisam depressa, mas em cadeia pública não há estorno. Proteger vem antes de monitorar.
+[AGPL-3.0](LICENSE). A fonte da assinatura, Mr De Haviland, é distribuída sob a [SIL Open Font License](api/cripto_api/estatico/fontes/OFL-MrDeHaviland.txt).

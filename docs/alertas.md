@@ -1,70 +1,54 @@
 # Alertas
 
-Como os eventos de cripto viram alerta. Nada disso foi testado ainda: é o desenho para a primeira fatia.
-
-## Caminho
-
-```
-Bitcoin Core (ZMQ / walletnotify) ─┐
-mempool (WebSocket)               ─┼─> coletor Panthera Crypto ─> regras ─> webhook, Telegram, e-mail
-OpenZeppelin Monitor (webhook)    ─┘          │
-                                              └─> consulta ao MISP (endereço em lista?)
-```
-
-O coletor junta as fontes, normaliza para um formato único, consulta o MISP pelos endereços de origem e de destino, aplica as regras e manda o alerta. Cada evento também é gravado numa linha JSON, para histórico e para quem quiser ligar outro sistema depois.
-
-## Formato do evento
-
-```json
-{
-  "origem": "panthera-crypto",
-  "evento": "saida",
-  "rede": "bitcoin",
-  "carteira": "fria-principal",
-  "organizacao": "cliente-exemplo",
-  "transacao": "b6f6...e1a0",
-  "estado": "mempool",
-  "ativo": "BTC",
-  "valor": "0.25000000",
-  "valor_brl": "152340.00",
-  "de": ["bc1q..."],
-  "para": ["bc1p..."],
-  "para_conhecido": false,
-  "para_em_lista": "",
-  "visto_em": "2026-11-03T10:15:00Z"
-}
-```
-
-Valores de `evento`: `entrada`, `saida`, `aprovacao`, `aprovacao_ilimitada`, `valor_zero_suspeito`, `mudanca_contrato`, `saldo_exchange_caiu`.
-
-`para_conhecido` diz se o destino está na agenda de endereços conferidos da carteira. `para_em_lista` traz o nome da lista do MISP em que o endereço apareceu, ou vazio.
+Cada movimento que toca uma carteira acompanhada passa pelas regras. O que importa vira alerta, e o alerta vai para os canais da organização.
 
 ## Regras
 
 | Condição | Gravidade |
 |---|---|
-| Entrada | Informativa |
-| Saída para endereço da agenda | Média |
-| Saída para endereço fora da agenda | Alta |
-| Saída acima do limite da carteira | Alta |
-| Aprovação ilimitada | Alta |
-| Valor zero de endereço parecido com um da agenda | Média, com aviso de envenenamento de endereço |
-| Mudança de dono ou de implementação em contrato com valor aplicado | Alta |
-| Qualquer endereço envolvido aparece em lista do MISP | Crítica |
+| Entrada | Baixa |
+| Saída para endereço conferido | Média |
+| Saída para endereço fora dos conferidos | Alta |
+| Saída acima do limite da carteira | Alta, mesmo para endereço conferido |
+| Valor mínimo (até 1.000 satoshis) vindo de endereço parecido com um conferido | Média, como possível envenenamento de endereço |
+| Qualquer endereço da outra ponta numa lista de sanções | Crítica, nos dois sentidos |
+| Movimento interno, só troco e taxa | Não alerta |
 
-Os limites e a agenda ficam no cadastro de cada carteira. As regras ficam no coletor, em arquivo de configuração, não espalhadas pelas fontes: o OpenZeppelin Monitor e o mempool só avisam que algo aconteceu.
+"Parecido" é ter o mesmo começo e o mesmo fim, que é o que as pessoas conferem com os olhos.
+
+O alerta sai com a transação ainda na mempool. É o momento em que ainda dá para agir: mover o que sobrou nas outras carteiras, avisar a exchange de destino, revogar o que precisar.
+
+O que já estava na carteira antes do cadastro entra como ponto de partida e não gera alerta.
 
 ## Canais
 
-- Webhook genérico, para ligar em qualquer sistema.
-- Telegram e e-mail para pessoas.
-- [ntfy](https://github.com/binwiederhier/ntfy) (Apache-2.0) para notificação no celular sem depender de serviço de terceiro.
+- **ntfy**: notificação no celular, com prioridade pela gravidade. Pode ser um servidor ntfy próprio.
+- **Webhook**: um JSON por alerta, para ligar em sistema de chamados ou qualquer outro.
 
-Alerta alto e crítico vai para pessoa na hora. Médio e informativo podem ir num resumo.
+Cada canal escolhe a gravidade mínima. Canal fora do ar recebe de novo, cada vez mais espaçado, por até 12 tentativas. O alerta fica gravado de qualquer jeito.
 
-## Cuidados
+A mensagem leva a carteira, o valor, os motivos e a transação. Nunca leva descritor, chave pública estendida nem saldo.
 
-- O coletor só tem chaves públicas e descritores só leitura. Nunca chave privada.
-- Descritor e xpub revelam todo o histórico da carteira. Tratar como dado sensível: guardar cifrado e separado por organização.
-- O alerta de saída para fora da agenda tem que sair no estado `mempool`, não só depois de confirmado.
-- Mensagem de alerta não leva descritor nem saldo total, só o evento.
+Canal que aponte para endereço interno (127.0.0.1, rede privada, link-local) é recusado. Sem isso, uma organização poderia usar o avisador para alcançar serviços de dentro da instalação.
+
+## Webhook
+
+```json
+{
+  "origem": "panthera-crypto",
+  "alerta": 1234,
+  "severidade": "alta",
+  "titulo": "Saída da carteira",
+  "motivos": ["Destino fora dos endereços conferidos", "Valor acima do limite da carteira"],
+  "carteira": "Fria principal",
+  "rede": "bitcoin",
+  "movimento": {
+    "tipo": "saida",
+    "transacao": "6e0bc01b0537…",
+    "estado": "mempool",
+    "valor_sats": 62000000,
+    "contrapartes": [{"endereco": "bc1q…", "valor_sats": 62000000}]
+  },
+  "criado_em": "2026-11-05T15:54:00+00:00"
+}
+```

@@ -1,52 +1,57 @@
-# Arquitetura de referência e próximos passos
+# Arquitetura
 
-## Camadas
+O desenho parte de uma regra: o custo de acompanhar não pode crescer com o número de endereços. Uma organização com dez carteiras e uma plataforma com um milhão de carteiras de clientes usam o mesmo caminho.
+
+## Caminho de uma transação
 
 ```
-┌──────────────────────────── Proteção ────────────────────────────┐
-│ Multisig 2 de 3 (Sparrow + BitBox02 + Jade + SeedSigner)         │
-│ ou Liana com recuperação por prazo                               │
-│ Safe em EVM, Rabby para assinar, revoke.cash mensal              │
-│ OpenBao para segredos de serviço, Gitleaks no CI                 │
-└──────────────────────────────────────────────────────────────────┘
-┌──────────────────────────── Fontes ──────────────────────────────┐
-│ Bitcoin Core + Fulcrum + mempool    Geth + Lighthouse            │
-│ (descritores só leitura, ZMQ)       OpenZeppelin Monitor         │
-│                                     rindexer para eventos        │
-└──────────────────────────────────────────────────────────────────┘
-┌──────────────────────────── Panthera ────────────────────────────┐
-│ Coletor Panthera Crypto: normaliza, consulta listas, aplica      │
-│ regras e avisa por ntfy, Telegram, e-mail ou webhook             │
-│ MISP: listas OFAC, ScamSniffer, indicadores dos incidentes       │
-│ Panthera Track: chamado aberto pelo alerta                       │
-└──────────────────────────────────────────────────────────────────┘
+                 ZMQ (rawtx, hashblock)            consulta em lote
+Bitcoin Core ───────────────────────────▶ ingestor ──────────────────▶ Postgres
+ (nó próprio)        RPC (blocos, origem)   │  uma cópia ativa por rede      │
+                                            ▼                                │
+                                     fila_transacoes                         │
+                                            │  FOR UPDATE SKIP LOCKED        │
+                                            ▼                                │
+                                  avaliador (N cópias) ── regras ── alertas ─┤
+                                            │                                │
+                                            ▼                                │
+                                       fila_envios                           │
+                                            │                                │
+                                            ▼                                │
+                                  avisador (N cópias) ── ntfy, webhook       │
+                                                                             │
+                     API (N processos, sem estado) ◀── console ◀─────────────┘
 ```
 
-## O que o Panthera Crypto escreveria
+1. **Ingestor.** Recebe cada transação da mempool e cada bloco pelo ZMQ do nó. Junta as transações em lotes de até 500 ou meio segundo e casa todas as saídas de uma vez com a tabela de endereços acompanhados (`endereco = ANY(...)`), de todas as organizações. As entradas são reconhecidas pela tabela `saidas`, que guarda as saídas não gastas das carteiras acompanhadas: um gasto é reconhecido sem perguntar a ninguém. Só quando uma transação paga uma carteira acompanhada o ingestor pergunta ao nó de onde veio o dinheiro, porque a origem importa para a lista de sanções e para o envenenamento de endereço. Uma cópia por rede fica ativa, presa numa trava do Postgres; as outras esperam e assumem se ela cair.
+2. **Avaliador.** Pega lotes da fila com `FOR UPDATE SKIP LOCKED`, transforma cada transação no movimento de cada carteira que ela toca, já descontando o troco, e aplica as regras. A mesma transação chega da mempool, do bloco e às vezes do ponto de partida: o movimento é gravado uma vez e depois só confirma, nunca volta. Item com erro volta para a fila cada vez mais espaçado, sem travar os outros.
+3. **Avisador.** Entrega os alertas nos canais de cada organização, com nova tentativa quando o canal está fora do ar.
+4. **Tarefas.** O ponto de partida de carteira nova sai do próprio nó, com `scantxoutset`: uma leitura do conjunto de saídas não gastas serve para até 50 carteiras de uma vez. Endereço usado perto do fim abre folga de mais 20.
+5. **Manutenção.** Atualiza a lista de sanções uma vez por dia e limpa sessões vencidas.
+6. **API.** Sem estado. Cada requisição abre uma transação presa à organização da sessão, e o próprio Postgres (RLS) só devolve linhas dessa organização.
 
-Quase tudo acima já existe. O que falta e seria código do projeto:
+## Por que assim
 
-1. **Coletor**: junta ZMQ do Bitcoin Core, WebSocket do mempool e webhook do OpenZeppelin Monitor num formato único, aplica as regras e manda o alerta ([formato e regras](alertas.md)).
-2. **Cadastro de carteiras por organização**: descritores e endereços só leitura, agenda de endereços conferidos, limites de valor por carteira. Guardado cifrado.
-3. **Carga das listas no MISP**: tarefa que baixa a lista OFAC e a do ScamSniffer e atualiza os feeds.
-4. **Tela no console do Roar** para as carteiras e os alertas, se fizer sentido juntar.
+| Decisão | Motivo |
+|---|---|
+| Fluxo do nó em vez de consultar endereço por endereço | Consultar um explorer por endereço cresce com o número de endereços, leva bloqueio (429) e entrega a lista de endereços a terceiros. O fluxo custa o volume da rede, que é fixo: poucas transações por segundo |
+| Nó próprio também para o ponto de partida | Sem Esplora nem explorer de terceiros. Uma leitura do conjunto de saídas atende muitas carteiras |
+| Filas no Postgres com `SKIP LOCKED` | Escala na horizontal sem um serviço de filas a mais para operar. Se um dia o volume pedir, a troca por um corretor de mensagens fica restrita às filas |
+| Tabelas grandes particionadas por hash | Endereços e saídas por endereço e transação, que é como o ingestor procura; movimentos e alertas por organização, que é como a tela lê |
+| Isolamento por organização no banco (RLS) | Um erro na API não vaza dado de outra organização: o banco recusa. Mesmo padrão do Panthera Roar |
+| Um papel de banco por função | A API não lê fila nem escreve movimento; os serviços não passam pelo isolamento porque atravessam organizações |
+| Paginação por cursor e buscas exatas | Nenhuma tela faz `OFFSET` nem `LIKE` em tabela grande. Busca é por transação exata, endereço exato (índice GIN em `contrapartes`) ou título |
+| Valores em satoshis, inteiros | Dinheiro não passa por ponto flutuante |
 
-## Fases
+## Onde aperta primeiro
 
-| Fase | Entrega | Pronto quando |
-|---|---|---|
-| 1 | Bitcoin Core em testnet4 + carteira só leitura + `walletnotify` gravando JSON | Uma transação de teste vira alerta no celular com o valor certo |
-| 2 | Agenda de endereços e regra de destino desconhecido, alerta ainda na mempool | Saída para endereço fora da agenda gera alerta de nível alto antes da confirmação |
-| 3 | Listas OFAC e ScamSniffer no MISP, consulta pelo coletor | Endereço da lista no destino gera alerta crítico |
-| 4 | EVM em Sepolia com OpenZeppelin Monitor: transferências, aprovações ilimitadas e valor zero | Os três tipos viram alerta, testados com contratos de teste próprios |
-| 5 | Teste com casos reais reproduzidos do DeFiHackLabs em fork local | As regras disparam nos casos escolhidos |
-| 6 | Mainnet, só leitura, para uma organização piloto | Uma semana sem falso positivo crítico |
+- **O nó.** Um Bitcoin Core com `txindex` precisa de cerca de 800 GB em SSD na rede principal. É o único componente que não se multiplica: para alta disponibilidade, um segundo nó e um segundo ingestor na espera.
+- **`scantxoutset`.** Leva de um a três minutos por leitura na rede principal, e o nó só faz uma por vez. Em lote de 50, isso dá algo como mil carteiras novas por hora. Para cadastro em massa, aumentar o lote.
+- **Lista de saídas.** Cresce com o número de saídas não gastas acompanhadas, não com o histórico. Saída gasta pode ser apagada depois de alguns meses sem perder nada.
 
-Testar sempre em testnet e em fork local primeiro. O projeto não toca em chave privada em nenhuma fase.
+## O que fica para depois
 
-## Decisões em aberto
-
-- Rodar nó próprio de Ethereum (cerca de 2 TB em SSD) ou começar com RPC de terceiro e aceitar que ele vê os endereços.
-- Coletor em Python, como a ingestão do Roar, ou em Go.
-- Se as carteiras ficam no banco do Roar, com o isolamento por organização que já existe, ou num banco próprio.
-- Licenças: Slither, Echidna, MISP e OpenZeppelin Monitor são AGPL-3.0. Usar como serviço separado não obriga a abrir o código do Panthera, mas modificar e oferecer pela rede obriga a publicar a modificação.
+- Redes EVM, com o mesmo desenho: o fluxo de blocos de um nó próprio, casado em lote com endereços e contratos acompanhados.
+- Tela de administração da plataforma, criando organizações e acessos, como no Roar. Hoje é por linha de comando.
+- Segundo fator no acesso, como no Roar.
+- Retenção configurável de movimentos e alertas.
