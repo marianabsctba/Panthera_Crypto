@@ -1,0 +1,109 @@
+# Portas só em 127.0.0.1. Quem expõe para fora é o proxy da instalação.
+# Para mais vazão: docker compose up -d --scale avaliador=4 --scale avisador=2
+x-servico: &servico
+  image: panthera-crypto:local
+  build:
+    context: ..
+    dockerfile: infra/Dockerfile
+  env_file: ${CRIPTO_ENV:-/opt/panthera-crypto/.env}
+  environment:
+    CRIPTO_BANCO: banco:5432
+    CRIPTO_RPC_BITCOIN: http://bitcoind:8332
+    CRIPTO_RPC_TESTNET4: http://bitcoind:48332
+    CRIPTO_RPC_SIGNET: http://bitcoind:38332
+    CRIPTO_RPC_REGTEST: http://bitcoind:18443
+    CRIPTO_ZMQ_BITCOIN: tcp://bitcoind:28332
+    CRIPTO_ZMQ_TESTNET4: tcp://bitcoind:28332
+    CRIPTO_ZMQ_SIGNET: tcp://bitcoind:28332
+    CRIPTO_ZMQ_REGTEST: tcp://bitcoind:28332
+  networks: [cripto]
+  restart: unless-stopped
+  depends_on:
+    migrar:
+      condition: service_completed_successfully
+
+services:
+  banco:
+    image: postgres:16@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a
+    environment:
+      POSTGRES_USER: cripto_dono
+      POSTGRES_PASSWORD: ${CRIPTO_SENHA_DONO}
+      POSTGRES_DB: cripto
+      CRIPTO_SENHA_API: ${CRIPTO_SENHA_API}
+      CRIPTO_SENHA_SERVICOS: ${CRIPTO_SENHA_SERVICOS}
+    command: ["postgres", "-c", "max_connections=300", "-c", "shared_buffers=1GB"]
+    ports:
+      - "127.0.0.1:${CRIPTO_PORTA_BANCO:-5444}:5432"
+    volumes:
+      - cripto-banco:/var/lib/postgresql/data
+      - ./banco/papeis.sh:/docker-entrypoint-initdb.d/papeis.sh:ro
+    networks: [cripto]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cripto_dono -d cripto"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    restart: unless-stopped
+
+  bitcoind:
+    image: panthera-crypto-bitcoind:32.1
+    build: ./bitcoind
+    # O índice de transações deixa o ingestor achar a origem de um pagamento recebido.
+    command:
+      - -chain=${CRIPTO_REDE:-main}
+      - -server=1
+      - -txindex=1
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=172.16.0.0/12
+      - -rpcuser=${CRIPTO_RPC_USUARIO}
+      - -rpcpassword=${CRIPTO_RPC_SENHA}
+      - -zmqpubrawtx=tcp://0.0.0.0:28332
+      - -zmqpubhashblock=tcp://0.0.0.0:28332
+      - -zmqpubrawtxhwm=100000
+      - -fallbackfee=0.0001
+    volumes:
+      - cripto-bitcoin:/home/bitcoin/.bitcoin
+    networks: [cripto]
+    restart: unless-stopped
+
+  migrar:
+    <<: *servico
+    command: ["python", "-m", "cripto_ingestao.banco", "migrar"]
+    restart: "no"
+    depends_on:
+      banco:
+        condition: service_healthy
+
+  api:
+    <<: *servico
+    command: ["uvicorn", "cripto_api.app:app", "--host", "0.0.0.0", "--port", "8700", "--workers", "${CRIPTO_API_PROCESSOS:-2}", "--proxy-headers"]
+    ports:
+      - "127.0.0.1:${CRIPTO_PORTA_API:-8740}:8700"
+
+  ingestor:
+    <<: *servico
+    command: ["python", "-m", "cripto_ingestao.ingestor", "--rede", "${CRIPTO_REDE_SERVICO:-bitcoin}"]
+
+  avaliador:
+    <<: *servico
+    command: ["python", "-m", "cripto_ingestao.avaliador"]
+
+  avisador:
+    <<: *servico
+    command: ["python", "-m", "cripto_ingestao.avisador"]
+
+  tarefas:
+    <<: *servico
+    command: ["python", "-m", "cripto_ingestao.tarefas"]
+
+  manutencao:
+    <<: *servico
+    command: ["python", "-m", "cripto_ingestao.manutencao"]
+
+volumes:
+  cripto-banco:
+  cripto-bitcoin:
+
+networks:
+  cripto:

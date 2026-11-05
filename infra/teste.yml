@@ -1,0 +1,6 @@
+# Só no ambiente de teste (regtest): o nó fica acessível em 127.0.0.1 para os testes mandarem transações.
+services:
+  bitcoind:
+    ports:
+      - "127.0.0.1:18443:18443"
+      - "127.0.0.1:28332:28332"
